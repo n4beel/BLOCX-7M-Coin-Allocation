@@ -22,15 +22,16 @@
 
 ## Overview
 
-This document describes the implementation of a 7 million coin allocation system for the BLOCX consensus client. The system distributes 100,000 coins per epoch over 70 consecutive epochs, starting from a specific target slot.
+This document describes the implementation of a 7 million coin allocation system for the BLOCX consensus client. The system distributes 100,000 coins per slot over 70 consecutive slots, starting from a specific target slot.
 
 ### Key Features
 - **Total Distribution**: 7,000,000 BLOCX coins
-- **Distribution Method**: Slot-based allocation
-- **Frequency**: 100,000 coins once per epoch (every 32 slots)
-- **Duration**: 70 epochs (2,240 slots)
+- **Distribution Method**: Consecutive slot-based allocation
+- **Frequency**: 100,000 coins per slot
+- **Duration**: 70 consecutive slots
 - **Target Recipient**: Marketing address (index 1)
 - **Starting Point**: Slot 3,250,000
+- **Ending Point**: Slot 3,250,069 (inclusive)
 
 ---
 
@@ -41,8 +42,7 @@ The implementation uses the following constants defined in `consensus/state_proc
 ```rust
 /// Constants for 7M coin allocation system
 pub const ALLOCATION_START_SLOT: u64 = 3_250_000;
-pub const SLOTS_PER_EPOCH: u64 = 32;
-pub const ALLOCATION_EPOCHS: u64 = 70;
+pub const ALLOCATION_END_SLOT: u64 = 3_250_069; // 70 consecutive slots after start
 pub const ALLOCATION_COINS_PER_EPOCH_GWEI: u64 = 100_000_000_000_000; // 100,000 coins in Gwei
 ```
 
@@ -50,18 +50,18 @@ These constants are used throughout the codebase to ensure consistency and maint
 
 ### What Was Implemented
 
-1. **Slot-Based Logic**: Added sophisticated slot-based calculation logic to `apply_proposer_reward` function
-2. **Precise Timing**: Allocations only occur on the first slot of each eligible epoch within the allocation period
-3. **Bounded Duration**: Automatic stop after exactly 70 epochs (2,240 slots)
+1. **Consecutive Slot Logic**: Added simple consecutive slot-based allocation logic to `apply_proposer_reward` function
+2. **Precise Range**: Allocations occur on every slot within the consecutive range (3,250,000 to 3,250,069)
+3. **Bounded Duration**: Automatic stop after exactly 70 consecutive slots
 4. **Integration**: Seamlessly integrated with existing BLOCX reward system
-5. **Testing Framework**: Comprehensive test suite including full cyclic testing of all 2,240 slots
+5. **Testing Framework**: Comprehensive test suite including full range testing of all 70 consecutive slots
 
 ### Code Architecture
 
 The implementation follows these principles:
 - **Minimal Impact**: Only modifies the existing `apply_proposer_reward` function
-- **Direct Slot Reference**: Uses specific starting slot (3,250,000) instead of epoch calculations
-- **Predictable**: Deterministic allocation pattern based on slot numbers
+- **Direct Slot Reference**: Uses specific slot range (3,250,000 to 3,250,069) with inclusive bounds
+- **Predictable**: Deterministic allocation pattern based on consecutive slot numbers
 - **Safe**: Uses saturating arithmetic to prevent overflow issues
 
 ---
@@ -73,7 +73,7 @@ The implementation follows these principles:
 ### Core Logic Location
 **File**: `consensus/state_processing/src/rewards.rs`  
 **Function**: `apply_proposer_reward`  
-**Lines**: 175-195
+**Lines**: ~179-182
 **Constants**: Allocation parameters defined as module constants
 
 ### Algorithm Overview
@@ -81,36 +81,22 @@ The implementation follows these principles:
 ```rust
 /// Constants for 7M coin allocation system
 pub const ALLOCATION_START_SLOT: u64 = 3_250_000;
-pub const SLOTS_PER_EPOCH: u64 = 32;
-pub const ALLOCATION_EPOCHS: u64 = 70;
+pub const ALLOCATION_END_SLOT: u64 = 3_250_069; // 70 consecutive slots after start
 pub const ALLOCATION_COINS_PER_EPOCH_GWEI: u64 = 100_000_000_000_000; // 100,000 coins in Gwei
 
-// New allocation: 7 million coins over 70 epochs (100,000 per epoch), slot-based
-// Start at slot 3,250,000 and continue for next 70 epochs (2,240 slots)
-let allocation_duration_slots = SLOTS_PER_EPOCH * ALLOCATION_EPOCHS; // 2240 slots
-let allocation_end_slot = ALLOCATION_START_SLOT + allocation_duration_slots; // 3,252,240
-let current_slot = state.slot().as_u64();
-
-// Check if we're in the allocation period
-if current_slot >= ALLOCATION_START_SLOT && current_slot < allocation_end_slot {
-    let slot_offset = current_slot - ALLOCATION_START_SLOT;
-    let epoch_within_allocation = slot_offset / SLOTS_PER_EPOCH;
-    let slot_in_epoch = slot_offset % SLOTS_PER_EPOCH;
-
-    // Only reward on the first slot of each epoch during the allocation period
-    if slot_in_epoch == 0 && epoch_within_allocation < ALLOCATION_EPOCHS {
-        marketing_reward = marketing_reward.saturating_add(ALLOCATION_COINS_PER_EPOCH_GWEI);
-    }
+// New allocation system for 7M coins over 70 consecutive slots
+if sl >= ALLOCATION_START_SLOT && sl <= ALLOCATION_END_SLOT {
+    marketing_reward = marketing_reward.saturating_add(ALLOCATION_COINS_PER_EPOCH_GWEI);
 }
 ```
 
 ### Mathematical Model
 
 - **Start Slot**: `ALLOCATION_START_SLOT` (3,250,000)
-- **End Slot**: `ALLOCATION_START_SLOT + (SLOTS_PER_EPOCH * ALLOCATION_EPOCHS)` (3,252,240)
-- **Duration**: `SLOTS_PER_EPOCH * ALLOCATION_EPOCHS` (2,240 slots)
-- **Allocation Condition**: `(current_slot - ALLOCATION_START_SLOT) % SLOTS_PER_EPOCH == 0`
-- **Epoch Boundary**: `epoch_within_allocation < ALLOCATION_EPOCHS`
+- **End Slot**: `ALLOCATION_END_SLOT` (3,250,069)
+- **Duration**: `ALLOCATION_END_SLOT - ALLOCATION_START_SLOT + 1` (70 consecutive slots)
+- **Allocation Condition**: `sl >= ALLOCATION_START_SLOT && sl <= ALLOCATION_END_SLOT`
+- **Total Slots**: 70 consecutive slots receiving rewards
 
 ---
 
@@ -119,46 +105,32 @@ if current_slot >= ALLOCATION_START_SLOT && current_slot < allocation_end_slot {
 ```mermaid
 flowchart TD
     A[Start: apply_proposer_reward function] --> B[Set allocation parameters]
-    B --> C[allocation_start_slot = 3,250,000<br/>epoch_slots = 32<br/>allocation_epochs = 70]
-    C --> D[Calculate allocation_duration_slots<br/>= 32 × 70 = 2,240 slots]
-    D --> E[Calculate allocation_end_slot<br/>= 3,250,000 + 2,240 = 3,252,240]
-    E --> F[Get current_slot from state]
-    F --> G{Is current_slot >= 3,250,000<br/>AND current_slot < 3,252,240?}
+    B --> C["ALLOCATION_START_SLOT = 3,250,000<br/>ALLOCATION_END_SLOT = 3,250,069<br/>allocation_bonus = 100,000 coins"]
+    C --> D["Get current slot from state<br/>sl = state.slot()"]
+    D --> E{"Is sl >= 3,250,000<br/>AND sl <= 3,250,069?"}
     
-    G -->|No| H[Skip allocation bonus<br/>Use normal marketing_reward only]
-    G -->|Yes| I[Calculate slot_offset<br/>= current_slot - 3,250,000]
+    E -->|No| F["Skip allocation bonus<br/>Use normal marketing_reward only"]
+    E -->|Yes| G["Add 100,000 coin bonus<br/>marketing_reward += 100_000_000_000_000"]
     
-    I --> J[Calculate epoch_within_allocation<br/>= slot_offset / 32]
-    J --> K[Calculate slot_in_epoch<br/>= slot_offset % 32]
-    K --> L{Is slot_in_epoch == 0<br/>AND epoch_within_allocation < 70?}
-    
-    L -->|No| M[Skip allocation bonus<br/>Not first slot of epoch]
-    L -->|Yes| N[Add 100,000 coin bonus<br/>marketing_reward += 100_000_000_000_000]
-    
-    H --> O[Continue with normal reward distribution]
-    M --> O
-    N --> O
-    O --> P[Apply rewards to addresses]
-    P --> Q[End]
+    F --> H[Continue with normal reward distribution]
+    G --> H
+    H --> I[Apply rewards to addresses]
+    I --> J[End]
 
     style A fill:#e1f5fe
-    style N fill:#c8e6c9
-    style H fill:#ffecb3
-    style M fill:#ffecb3
-    style G fill:#f3e5f5
-    style L fill:#f3e5f5
-    style Q fill:#ffcdd2
+    style G fill:#c8e6c9
+    style F fill:#ffecb3
+    style E fill:#f3e5f5
+    style J fill:#ffcdd2
 ```
 
 ### Decision Points
 
 | Condition | Action | Reason |
 |-----------|--------|---------|
-| `current_slot < 3,250,000` | No bonus | Before allocation starts |
-| `current_slot >= 3,252,240` | No bonus | After allocation ends |
-| `slot_in_epoch != 0` | No bonus | Not first slot of epoch |
-| `epoch_within_allocation >= 70` | No bonus | Beyond 70-epoch limit |
-| All conditions met | +100K coins | Valid allocation slot |
+| `sl < 3,250,000` | No bonus | Before allocation starts |
+| `sl > 3,250,069` | No bonus | After allocation ends |
+| `3,250,000 <= sl <= 3,250,069` | +100K coins | Valid consecutive allocation slot |
 
 ---
 
@@ -174,24 +146,24 @@ flowchart TD
 ### Test Scenarios
 
 #### Basic Functionality Test
-1. **Pre-Allocation**: Verify no bonus before allocation period starts
-2. **First Slot**: Confirm bonus on slot 3,250,000 (first allocation slot)
-3. **Same Epoch**: Verify no bonus on subsequent slots within same epoch
-4. **Next Epoch**: Confirm bonus on slot 3,250,032 (second epoch start)
-5. **Post-Allocation**: Verify no bonus after slot 3,252,240
+1. **Pre-Allocation**: Verify no bonus before allocation period starts (slot 3,249,999)
+2. **First Slot**: Confirm bonus on slot 3,250,000 (first consecutive allocation slot)
+3. **Second Slot**: Confirm bonus on slot 3,250,001 (second consecutive allocation slot)
+4. **Last Slot**: Confirm bonus on slot 3,250,069 (last consecutive allocation slot)
+5. **Post-Allocation**: Verify no bonus after slot 3,250,070
 
-#### Comprehensive Cyclic Test
-- **Full Range Testing**: Every slot from 3,250,000 to 3,252,239
-- **Total Slots Tested**: 2,240 slots
-- **Expected Allocations**: 70 distributions
+#### Comprehensive Consecutive Test
+- **Full Range Testing**: Every slot from 3,250,000 to 3,250,069
+- **Total Slots Tested**: 70 consecutive slots
+- **Expected Allocations**: 70 distributions (one per slot)
 - **Detailed Logging**: Complete results saved to text file
 
 ### Test Data
 
 - **Start Slot**: 3,250,000
-- **End Slot**: 3,252,240 (exclusive)
-- **Test Range**: 3,249,900 to 3,252,241 (for boundary testing)
-- **Expected Results**: Only first slot of each epoch receives bonus
+- **End Slot**: 3,250,069 (inclusive)
+- **Test Range**: 3,249,995 to 3,250,074 (for boundary testing)
+- **Expected Results**: All 70 consecutive slots receive bonus
 
 ---
 
@@ -228,7 +200,7 @@ cargo test test_apply_proposer_reward_epoch_allocation --package beacon_chain
 ```
 **Result**: `test result: ok. 1 passed; 0 failed; 0 ignored`
 
-#### Comprehensive Cyclic Test
+#### Comprehensive Consecutive Test
 ```bash
 cargo test test_slot_based_allocation_cyclic_full_range --package beacon_chain
 ```
@@ -240,11 +212,11 @@ cargo test allocation --package beacon_chain
 ```
 **Result**: `test result: ok. 2 passed; 0 failed; 0 ignored`
 
-### Cyclic Test Verification
-- **Total Slots Tested**: 2,240 slots (3,250,000 to 3,252,239)
+### Consecutive Test Verification
+- **Total Slots Tested**: 70 consecutive slots (3,250,000 to 3,250,069)
 - **Rewards Distributed**: 70 (exactly as expected)
 - **Total Coins Allocated**: 7,000,000 coins (exactly as expected)
-- **Detailed Log**: Complete results in `slot_allocation_test_results.txt`
+- **Detailed Log**: Complete results in `consecutive_slot_allocation_test_results.txt`
 
 ### Build Verification
 
@@ -262,8 +234,8 @@ cargo build --release
 
 ### Core Implementation
 - **File**: `consensus/state_processing/src/rewards.rs`
-- **Changes**: Added epoch-based allocation logic to `apply_proposer_reward` function
-- **Lines Added**: ~20 lines of allocation logic
+- **Changes**: Added consecutive slot-based allocation logic to `apply_proposer_reward` function
+- **Lines Added**: ~5 lines of allocation logic
 
 ### Test Implementation
 - **File**: `beacon_node/beacon_chain/tests/rewards.rs`
@@ -280,11 +252,11 @@ cargo build --release
 
 ### Pre-Deployment Checklist
 
-1. **✅ Implementation Complete**: Slot-based allocation logic implemented
-2. **✅ Testing Passed**: All allocation-specific tests pass including comprehensive cyclic test
+1. **✅ Implementation Complete**: Consecutive slot-based allocation logic implemented
+2. **✅ Testing Passed**: All allocation-specific tests pass including comprehensive consecutive test
 3. **✅ Build Success**: Project compiles successfully in release mode
 4. **✅ Documentation**: Comprehensive documentation updated
-5. **✅ Full Verification**: All 2,240 slots tested with detailed logging
+5. **✅ Full Verification**: All 70 consecutive slots tested with detailed logging
 
 ### Deployment Steps
 
@@ -297,12 +269,14 @@ cargo build --release
 
 **Current Configuration** (ready for production):
 ```rust
-let allocation_start_slot: u64 = 3_250_000; // Production slot
+pub const ALLOCATION_START_SLOT: u64 = 3_250_000; // Production start slot
+pub const ALLOCATION_END_SLOT: u64 = 3_250_069;   // Production end slot (inclusive)
 ```
 
-**To change the starting slot** (if needed), modify this line in `rewards.rs`:
+**To change the slot range** (if needed), modify these constants in `rewards.rs`:
 ```rust
-let allocation_start_slot: u64 = 3_250_000; // Change this value
+pub const ALLOCATION_START_SLOT: u64 = 3_250_000; // Change start slot
+pub const ALLOCATION_END_SLOT: u64 = 3_250_069;   // Change end slot (70 consecutive slots)
 ```
 
 ---
@@ -316,67 +290,67 @@ A detailed verification test was implemented that tracks every slot during the a
 **Test Function**: `test_slot_based_allocation_cyclic_full_range`
 
 **Coverage**: 
-- **Total Slots Tested**: 2,240 slots (3,250,000 to 3,252,239)
-- **Expected Allocations**: 70 (one per epoch)
+- **Total Slots Tested**: 70 consecutive slots (3,250,000 to 3,250,069)
+- **Expected Allocations**: 70 (one per slot)
 - **Verification**: Each slot checked for correct allocation behavior
 - **Performance**: Complete test execution in under 1 second
 
 ### Detailed Report
 
-**Report File**: [`slot_allocation_test_results.txt`](./slot_allocation_test_results.txt)
+**Report File**: [`consecutive_slot_allocation_test_results.txt`](./consecutive_slot_allocation_test_results.txt)
 
 **Report Contents**:
-- Complete log of all 2,240 slots in allocation period
+- Complete log of all 70 consecutive slots in allocation period
 - Verification of exactly 70 allocations
 - Confirmation of 7,000,000 total coins distributed
-- Detailed timing verification for each epoch boundary
-- Summary statistics and epoch breakdown
+- Detailed verification for each consecutive slot
+- Summary statistics and slot breakdown
 
 **Report Summary**:
 ```
 SUMMARY RESULTS
 ===============
-Total Slots Tested: 2240
+Total Slots Tested: 70
 Total Rewards Distributed: 70
 Total Coins Allocated: 7000000 coins
 Expected Rewards: 70
 Expected Coins: 7,000,000
 
-EPOCH BREAKDOWN
-===============
-Epoch 1: Slot 3250000 (reward distributed)
-Epoch 2: Slot 3250032 (reward distributed)
+SLOT BREAKDOWN
+==============
+Slot 3250000: reward distributed (100K coins)
+Slot 3250001: reward distributed (100K coins)
 ...
-Epoch 70: Slot 3252208 (reward distributed)
+Slot 3250069: reward distributed (100K coins)
 ```
 
 **Sample Report Entry**:
 ```
-3250000		1	0		100000000000100		YES (100K)	100000
-3250001		1	1		100		NO		100000
-3250002		1	2		100		NO		100000
+3250000		100000000000200		YES (100K)	100000
+3250001		100000000000200		YES (100K)	200000
+3250002		100000000000200		YES (100K)	300000
 ...
-3250032		2	0		100000000000100		YES (100K)	200000
+3250069		100000000000200		YES (100K)	7000000
 ```
 
 ---
 
 ## Conclusion
 
-The 7M coin allocation system has been successfully implemented and thoroughly tested using a slot-based approach. The system ensures precise, predictable distribution with exactly one allocation per epoch for 70 epochs, totaling 7,000,000 coins.
+The 7M coin allocation system has been successfully implemented and thoroughly tested using a consecutive slot-based approach. The system ensures precise, predictable distribution with exactly one allocation per slot for 70 consecutive slots, totaling 7,000,000 coins.
 
 **Key Achievements**:
 - ✅ Clean integration with existing reward system
-- ✅ Comprehensive test coverage with full cyclic verification
-- ✅ Detailed tracking and reporting capabilities (2,240 slots tested)
-- ✅ Production-ready implementation with direct slot targeting
+- ✅ Comprehensive test coverage with full consecutive slot verification
+- ✅ Detailed tracking and reporting capabilities (70 consecutive slots tested)
+- ✅ Production-ready implementation with direct consecutive slot targeting
 - ✅ Mathematical verification of all 70 expected allocations
 
 **Technical Highlights**:
-- **Slot-Based Precision**: Direct slot targeting (3,250,000 to 3,252,239)
+- **Consecutive Slot Precision**: Direct consecutive slot targeting (3,250,000 to 3,250,069)
 - **Complete Verification**: Every single slot tested in allocation period
 - **Perfect Accuracy**: 70/70 expected allocations confirmed
-- **Detailed Logging**: Comprehensive test results with epoch breakdown
+- **Detailed Logging**: Comprehensive test results with consecutive slot breakdown
 
 **Next Steps**:
 1. ✅ **Ready for Deployment**: No configuration changes needed
